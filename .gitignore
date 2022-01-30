@@ -1,0 +1,17 @@
+build/
+cmake-build-*/
+.idea/
+CMakeFiles/
+conan.lock
+conanbuildinfo.cmake
+conanbuildinfo.txt
+conaninfo.txt
+graph_info.json
+conanworkspace.cmake
+CMakeCache.txt
+cmake_install.cmake
+*.cbp
+build_log.txt
+.vs/
+out/*
+CMakeSettings.json

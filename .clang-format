@@ -1,0 +1,40 @@
+# General Options
+BasedOnStyle: Google
+ColumnLimit: 120
+Language: Cpp
+Standard: c++17
+PointerAlignment: Left
+DerivePointerAlignment: false
+TabWidth: 4
+UseTab: Never
+
+# Whitespace Settings
+MaxEmptyLinesToKeep: 2
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+SpacesBeforeTrailingComments: 2
+SpacesInAngles: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# Sorting
+SortIncludes: true
+SortUsingDeclarations: true
+
+# Single/Multiline Collapse/Expansion
+AllowAllConstructorInitializersOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AlwaysBreakTemplateDeclarations: true
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never 
+AllowShortLambdasOnASingleLine: Empty
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
