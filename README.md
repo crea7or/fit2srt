@@ -4,24 +4,38 @@ This tool can be used to create subtitles overlay (without video re-encoding) fo
 
 Usage:
 ```
-usage: fitsrt <input> <output> <offset>
-
+fitsrt <input> <output> <offset>
+```
 input - path to .fit file to read data from
+
 output - path to .srt file to write subtitle to
+
 offset - optional offset in seconds to sync video and .fit data
 * if the offset is positive - 'offset' second of the data from .fit file will be displayed at the first second of the video.
     it is for situations when you started video after starting recording your activity(that generated .fit file)
 * if the offset is negative - the first second of .fit data will be displayed at abs('offset') second of the video
     it is for situations when you started your activity (that generated .fit file) after starting the video
 
-```
 
 You can place subtitles to the same folder as the video with the same file name(but keep .srt extension) or embed subtitles into the video file (without re-encoding). You can use [FFMPEG tool](https://www.ffmpeg.org/download.html) for embedding:
 ```
 ffmpeg -i infile.mp4 -i infile.srt -c copy -c:s mov_text outfile.mp4 
 ```
 
-Tested in Visual Studio 2019(2022) (Open as Folder) and gcc under ubuntu. This project uses Conan as a dependency manager and CMake as a build system.
+Sample result while playing locally with Media Player Classic:
+![Sample result while playing locally with Media Player Classic](https://github.com/crea7or/fit2srt/blob/master/local_video.jpg)
+
+[Medial Player Classic Download](https://github.com/clsid2/mpc-hc/releases)
+
+[Video LAN Player Download](https://www.videolan.org/vlc/)
+
+
+Sample result while playing at Youtube: [Youtube video link](https://www.youtube.com/watch?v=HXCMJMjm_XM)
+![Sample result while playing at Youtube](https://github.com/crea7or/fit2srt/blob/master/youtube.video.jpg)
+
+
+
+Tested in Visual Studio 2019(2022) (Open as Folder) and GCC under ubuntu. This project uses Conan as a dependency manager and CMake as a build system.
 
 Build command:
 ```
