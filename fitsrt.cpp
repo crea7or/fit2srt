@@ -28,8 +28,6 @@
 #include <vector>
 
 #include "fitsdk/fit_convert.h"
-#include "stdio.h"
-#include "string.h"
 
 constexpr const char kBanner[] = R"%(
 
