@@ -1,5 +1,7 @@
 [requires]
 spdlog/1.9.2
+rapidjson/cci.20200410
+cxxopts/3.0.0
 
 [generators]
 cmake

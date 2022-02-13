@@ -1,6 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.8)
 
-project("fitsrt")
+project("fitconvert")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,7 +24,9 @@ set(FITSDK_SRC
 	)
 
 set(TARGET_SRC
-	"fitsrt.cpp"
+	"converter.cpp"
+	"parser.cpp"
+	"parser.h"
 	)
 
 execute_process(COMMAND echo "Run conan install...")

@@ -1,4 +1,4 @@
-# FIT telemetry to SRT subtitles convertor
+# FIT telemetry converter to SRT subtitles or JSON
 
 This tool can be used to create subtitles overlay (without video re-encoding) for your action video with the telemetry from .fit file recorded by FIT enabled device (Garmin / Suunto / Bryton etc.). Many video players accept subtitles in this format, you can even upload these subtitles to the [Youtube](https://support.google.com/youtube/answer/2734796) video as captions.
 
