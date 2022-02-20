@@ -1,106 +1,109 @@
+/*
+
+ MIT License
+
+ Copyright (c) 2022 pavel.sokolov@gmail.com / CEZEO software Ltd. All rights reserved.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+ documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+ rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+ persons to whom the Software is furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+ Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+ WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+*/
+
 #include <string>
 #include <vector>
 
-constexpr char* kSpeedTag = "speed";
-constexpr char* kSpeedUnitsTag = "m/sec";
-
-constexpr char* kDistanceTag = "distance";
-constexpr char* kDistanceUnitsTag = "cm";
-
-constexpr char* kHeartRateTag = "heartrate";
-constexpr char* kHeartRateUnitsTag = "bpm";
-
-constexpr char* kAltitudeTag = "altitude";
-constexpr char* kAltitudeUnitsTag = "cm";
-
-constexpr char* kPowerTag = "power";
-constexpr char* kPowerUnitsTag = "w";
-
-constexpr char* kCadenceTag = "cadence";
-constexpr char* kCadenceUnitsTag = "rpm";
-
-constexpr char* kTemperatureTag = "temperature";
-constexpr char* kTemperatureUnitsTag = "c";
-
-constexpr char* kTimeStampTag = "timestamp";
-constexpr char* kTimeStampUnitsTag = "sec";
-
-constexpr char* kLatitudeTag = "latitude";
-constexpr char* kLatitudeUnitsTag = "semicircles";
-
-constexpr char* kLongitudeTag = "longitude";
-constexpr char* kLongitudeUnitsTag = "semicircles";
-
-constexpr char* kOutputJsonTag = "json";
-constexpr char* kOutputSrtTag = "srt";
-constexpr char* kInputStdinTag = "stdin";
-constexpr char* kOutputStdoutTag = "stdout";
-
-
 enum class DataType : uint32_t {
-  kTypeNone = 0,                 //
-  kTypeSpeed = 0x01 << 0,        //
-  kTypeDistance = 0x01 << 1,     //
-  kTypeHeartRate = 0x01 << 2,    //
-  kTypeAltitude = 0x01 << 3,     //
-  kTypePower = 0x01 << 4,        //
-  kTypeCadence = 0x01 << 5,      //
-  kTypeTemperature = 0x01 << 6,  //
-  kTypeTimeStamp = 0x01 << 7,    //
-  kTypeLatitude = 0x01 << 8,     //
-  kTypeLongitude = 0x01 << 9,    //
+  // always should be zero
+  kTypeFirst = 0,
+  kTypeSpeed = 0,
+  kTypeDistance = 1,
+  kTypeHeartRate = 2,
+  kTypeAltitude = 3,
+  kTypePower = 4,
+  kTypeCadence = 5,
+  kTypeTemperature = 6,
+  kTypeTimeStamp = 7,
+  kTypeLatitude = 8,
+  kTypeLongitude = 9,
+  // always should be at the end
+  kTypeMax,
 };
 
-constexpr DataType operator|(const DataType selfValue, const DataType inValue) {
-  return (DataType)(uint32_t(selfValue) | uint32_t(inValue));
-}
+inline constexpr uint32_t kDataTypeFirst = static_cast<uint32_t>(DataType::kTypeFirst);
+inline constexpr uint32_t kDataTypeMax = static_cast<uint32_t>(DataType::kTypeMax);
 
-constexpr DataType operator&(const DataType selfValue, const DataType inValue) {
-  return (DataType)(uint32_t(selfValue) & uint32_t(inValue));
-}
-
-constexpr DataType& operator|=(DataType& selfValue, DataType inValue) {
-  selfValue = (DataType)(uint32_t(selfValue) | uint32_t(inValue));
-  return selfValue;
-}
-
-// int64_t is used for all values because uint32_t/int32_t is the maximum possible value in the .fit file
-// value type <> value data
-struct DataPoint {
-  DataPoint(const char* type_ptr, int32_t value) : type(type_ptr), value(value) {}
-  DataPoint(const char* type_ptr, uint32_t value) : type(type_ptr), value(static_cast<int64_t>(value)) {}
-  DataPoint(const DataPoint&) = default;
-  DataPoint(DataPoint&&) = default;
-  std::string type;
-  int64_t value;
+struct Record {
+  int64_t values[static_cast<uint32_t>(DataType::kTypeMax)]{};
+  uint32_t Valid{0};  // mask of values DataType values: 0x01 << DataType
 };
 
-// single data entry for one record
-struct DataEntry {
-  explicit DataEntry(uint32_t timestamp) : timestamp(static_cast<int64_t>(timestamp)) {}
-  DataEntry(const DataEntry&) = default;
-  DataEntry(DataEntry&&) = default;
+constexpr Record operator-(const Record left_value, const Record right_value) {
+  Record diff_record;
+  diff_record.Valid = left_value.Valid & right_value.Valid;
+  for (uint32_t index = kDataTypeFirst; index < kDataTypeMax; ++index) {
+    diff_record.values[index] = left_value.values[index] - right_value.values[index];
+  }
+  return diff_record;
+}
 
-  int64_t timestamp;
-  std::vector<DataPoint> values;
-};
+constexpr Record operator+(const Record left_value, const Record right_value) {
+  Record summ_record;
+  summ_record.Valid = left_value.Valid & right_value.Valid;
+  for (uint32_t index = kDataTypeFirst; index < kDataTypeMax; ++index) {
+    summ_record.values[index] = left_value.values[index] + right_value.values[index];
+  }
+  return summ_record;
+}
+
+constexpr Record operator/(const Record left_value, const int64_t divider) {
+  Record divided_record;
+  divided_record.Valid = left_value.Valid;
+  for (uint32_t index = kDataTypeFirst; index < kDataTypeMax; ++index) {
+    divided_record.values[index] = left_value.values[index] / divider;
+  }
+  return divided_record;
+}
 
 struct DataTagUnit {
-  DataTagUnit(const char* tag, const char* units)
-      : data_tag(tag, std::char_traits<char>::length(tag)),
-        data_units_tag(units, std::char_traits<char>::length(units)) {}
-  std::string data_tag;
-  std::string data_units_tag;
+  DataTagUnit() = default;
+  DataTagUnit(std::string_view tag, std::string_view units) : data_tag(std::move(tag)), data_units(std::move(units)) {}
+
+  bool IsValid() const { return false == data_tag.empty() && false == data_units.empty(); }
+
+  std::string_view data_tag;
+  std::string_view data_units;
+};
+
+enum class ParseResult {
+  kSuccess,
+  kError,
 };
 
 struct FitResult {
-  // parsed data from .fit
-  std::vector<DataEntry> result;
+  // parsing status
+  ParseResult status{ParseResult::kError};
 
-  // header for all available types of data
-  DataType used_data_types{DataType::kTypeNone};
+  // parsed data from file
+  std::vector<Record> result;
+
+  // header for all available types of data in this file
+  std::vector<DataTagUnit> header;
+  // header in bitmask format
+  uint32_t header_flags{0};
 };
 
-DataTagUnit DataTypeToTag(DataType type);
+std::string_view DataTypeToName(const DataType type);
+std::string_view DataTypeToUnit(const DataType type);
+uint32_t DataTypeToMask(const DataType type);
 
 FitResult FitParser(std::string input);

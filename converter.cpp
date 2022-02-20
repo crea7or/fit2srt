@@ -91,41 +91,76 @@ usage: fitconvert -i input_file -o output_file -t output_type -f offset -s N
 -s - smooth values by inserting N smoothed values between timestamps (optional, for srt export only)
 )%";
 
+constexpr char* kOutputJsonTag = "json";
+constexpr char* kOutputSrtTag = "srt";
+constexpr char* kInputStdinTag = "stdin";
+constexpr char* kOutputStdoutTag = "stdout";
+
 struct Time {
-  uint32_t hours{0};
-  uint32_t minutes{0};
-  uint32_t seconds{0};
+  int64_t hours{0};
+  int64_t minutes{0};
+  int64_t seconds{0};
+  int64_t milliseconds{0};
 };
 
 struct SrtItem {
-  SrtItem(uint32_t frame, uint32_t seconds_from, uint32_t seconds_to, std::string data)
-      : frame(frame), seconds_from(seconds_from), seconds_to(seconds_to), data(std::move(data)) {}
-  uint32_t frame{0};
-  uint32_t seconds_from{0};
-  uint32_t seconds_to{0};
+  SrtItem(int64_t frame, int64_t milliseconds_from, int64_t milliseconds_to, std::string data)
+      : frame(frame), milliseconds_from(milliseconds_from), milliseconds_to(milliseconds_to), data(std::move(data)) {}
+  int64_t frame{0};
+  int64_t milliseconds_from{0};
+  int64_t milliseconds_to{0};
   std::string data;
 };
 
-Time GetTime(uint32_t seconds_total) {
+Time GetTime(const int64_t milliseconds_total) {
   Time time_struct;
-  uint32_t minutes_total = seconds_total / 60;
-  uint32_t hours_total = minutes_total / 60;
-  time_struct.hours = hours_total;
-  time_struct.minutes = minutes_total - (hours_total * 60);
-  time_struct.seconds = seconds_total - ((time_struct.minutes * 60) + (hours_total * 3600));
+  int64_t ms_remainder = milliseconds_total;
+  time_struct.hours = ms_remainder / 3600000;
+  ms_remainder = ms_remainder - (time_struct.hours * 3600000);
+  time_struct.minutes = ms_remainder / 60000;
+  ms_remainder = ms_remainder - (time_struct.minutes * 60000);
+  time_struct.seconds = ms_remainder / 1000;
+  time_struct.milliseconds = ms_remainder - (time_struct.seconds * 1000);
   return time_struct;
 }
 
-void HeaderItem(rapidjson::Writer<rapidjson::StringBuffer>& writer, DataType in_header, DataType check_for) {
-  if ((in_header & check_for) == check_for) {
-    writer.StartObject();
-    const auto tags = DataTypeToTag(check_for);
-    writer.Key("data");
-    writer.String(tags.data_tag);
-    writer.Key("units");
-    writer.String(tags.data_units_tag);
-    writer.EndObject();
+struct ValueByType {
+  bool Valid() const { return dt != DataType::kTypeMax; };
+  int64_t value{0};
+  DataType dt{DataType::kTypeMax};
+};
+
+ValueByType GetValueByType(const Record& record, const DataType type) {
+  ValueByType result;
+  if ((record.Valid & DataTypeToMask(type)) != 0) {
+    result.dt = type;
+    const uint32_t data_type_index = static_cast<uint32_t>(type);
+    result.value = record.values[data_type_index];
   }
+  return result;
+}
+
+std::string NumberToStringPrecision(const int64_t number,
+                                    const double divider,
+                                    const size_t total_symbols,
+                                    const size_t dot_limit) {
+  const double double_number = static_cast<double>(number);
+  std::string str_result(std::to_string(double_number / divider));
+  str_result = str_result.substr(0, total_symbols);
+  const size_t dot_string_size = str_result.size();
+  const size_t dot_position = str_result.find('.');
+  if (dot_position != std::string::npos) {
+    const size_t after_dot_position = dot_limit + 1;
+    if ((dot_string_size - dot_position) > after_dot_position) {
+      str_result = str_result.substr(0, (dot_position + after_dot_position));
+    }
+  }
+
+  const size_t string_size = str_result.size();
+  if (string_size > 0 && str_result.at(string_size - 1) == '.') {
+    str_result = str_result.substr(0, string_size - 1);
+  }
+  return str_result;
 }
 
 int main(int argc, char* argv[]) {
@@ -139,8 +174,8 @@ int main(int argc, char* argv[]) {
       ("t,type",
        "output format to generate (srt or json)",
        cxxopts::value<std::string>()->default_value(kOutputSrtTag))                                             //
-      ("f,offset", "offset in milliseconds to sync with video", cxxopts::value<int32_t>()->default_value("0"))  //
-      ("s,smooth", "smooth values", cxxopts::value<uint64_t>()->default_value("0"));                            //
+      ("f,offset", "offset in milliseconds to sync with video", cxxopts::value<int64_t>()->default_value("0"))  //
+      ("s,smooth", "smooth values", cxxopts::value<int32_t>()->default_value("0"));                             //
   const auto cmd_result = cmd_options.parse(argc, argv);
 
   if (argc < 3 || cmd_result.count("help") > 0) {
@@ -153,26 +188,25 @@ int main(int argc, char* argv[]) {
     const std::string input_fit_file(cmd_result["input"].as<std::string>());
     const std::string output_file(cmd_result["output"].as<std::string>());
     const std::string output_type(cmd_result["type"].as<std::string>());
-    const int32_t offset = cmd_result["offset"].as<int32_t>();
-    const uint64_t smothness = cmd_result["smooth"].as<uint64_t>();
+    const int64_t offset = cmd_result["offset"].as<int64_t>();
+    const int32_t smoothness = cmd_result["smooth"].as<int32_t>();
 
     if (output_type != kOutputJsonTag && output_type != kOutputSrtTag) {
       SPDLOG_ERROR("unknown output specified: '{}', only srt and .json supported", output_type);
       return 1;
     }
 
-    if (output_type == kOutputJsonTag && (offset != 0 || smothness != 0)) {
+    if (output_type == kOutputJsonTag && (offset != 0 || smoothness != 0)) {
       SPDLOG_WARN("smoothness or offset valid only for .srt output format");
     }
 
-    if (smothness > 10) {
-      SPDLOG_ERROR("smoothness can not be more than 10");
+    if (smoothness > 9) {
+      SPDLOG_ERROR("smoothness can not be more than 9");
       return 1;
     }
 
-    const FitResult fit_result = FitParser(input_fit_file);
-    if (fit_result.used_data_types == DataType::kTypeNone) {
-      // Special meaning - processing error.The exact error has been reported in the FitParser function.
+    FitResult fit_result = FitParser(input_fit_file);
+    if (fit_result.status != ParseResult::kSuccess) {
       return 1;
     }
 
@@ -184,35 +218,36 @@ int main(int argc, char* argv[]) {
       writer.Key("header");
       writer.StartArray();
       // header objects
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeAltitude);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeCadence);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeDistance);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeHeartRate);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeLatitude);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeLongitude);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypePower);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeSpeed);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeTemperature);
-      HeaderItem(writer, fit_result.used_data_types, DataType::kTypeTimeStamp);
+      for (const auto& header_item : fit_result.header) {
+        writer.StartObject();
+        writer.Key("data");
+        writer.String(header_item.data_tag.data(), static_cast<rapidjson::SizeType>(header_item.data_tag.size()));
+        writer.Key("units");
+        writer.String(header_item.data_units.data(), static_cast<rapidjson::SizeType>(header_item.data_units.size()));
+        writer.EndObject();
+      }
       writer.EndArray();
       // records
       writer.Key("records");
       writer.StartArray();
 
-      for (const auto item : fit_result.result) {
+      for (const auto& item : fit_result.result) {
         writer.StartObject();
-        writer.Key(kTimeStampTag);
-        writer.Int64(item.timestamp);
-        for (const auto value : item.values) {
-          writer.Key(value.type);
-          writer.Int64(value.value);
+
+        for (uint32_t index = kDataTypeFirst; index < kDataTypeMax; ++index) {
+          const auto value_by_type = GetValueByType(item, static_cast<DataType>(index));
+          if (value_by_type.Valid()) {
+            const auto name = DataTypeToName(value_by_type.dt);
+            writer.Key(name.data(), static_cast<rapidjson::SizeType>(name.size()));
+            writer.Int64(value_by_type.value);
+          }
         }
+
         writer.EndObject();
       }
 
       writer.EndArray();
       writer.EndObject();
-
 
       std::filesystem::remove(output_file);
       std::ofstream output_stream(output_file, std::ios::out | std::ios::app | std::ios::binary);
@@ -220,29 +255,151 @@ int main(int argc, char* argv[]) {
       output_stream.close();
 
     } else if (output_type == kOutputSrtTag) {
-      /*
-      uint32_t first_video_timestamp = 0;
-      uint32_t first_fit_timestamp = 0;
+      int64_t records_count = 0;
+      int64_t first_video_timestamp = 0;
+      int64_t first_fit_timestamp = 0;
+      int64_t ascent = 500 * 5;   // x / 5 - 500
+      int64_t descent = 500 * 5;  // x / 5 - 500
+      int64_t previous_altitude = 0;
+      bool initial_altitude_set = false;
+      std::vector<SrtItem> subtitles;
+
+      for (auto& rec : fit_result.result) {
+        // convert all timestamps to milliseconds
+        constexpr uint32_t type_index = static_cast<uint32_t>(DataType::kTypeTimeStamp);
+        rec.values[type_index] *= 1000;
+      }
+
+      size_t valid_value_count = 0;
+      for (size_t index = 0; index < fit_result.result.size(); ++index) {
+        const auto& original_record = fit_result.result[index];
+
+        const auto record_time_by_type = GetValueByType(original_record, DataType::kTypeTimeStamp);
+        const int64_t record_timestamp = record_time_by_type.Valid() ? record_time_by_type.value : 0;
+
+        // fit timestamp should not be 0, because it's milliseconds since UTC 00:00 Dec 31 1989
+        if (0 == first_fit_timestamp) {
+          first_fit_timestamp = record_timestamp;
+          if (offset > 0) {
+            first_fit_timestamp += offset;
+          } else if (offset < 0) {
+            first_video_timestamp = std::abs(offset);
+            subtitles.emplace_back(records_count++, 0, 0, "< .fit data is not available >");
+          }
+        }
+
+        if (offset > 0) {
+          // positive offset, 'offset' second of the data from .fit file will displayed at the first second of the
+          // video
+          if (record_timestamp < first_fit_timestamp) {
+            continue;
+          }
+        }
+
+        // smoothness
+        std::vector<Record> records_to_process;
+        if (valid_value_count > 0 && smoothness > 0) {
+          Record start_from = fit_result.result[index - 1];
+          Record diff = original_record - start_from;
+          diff = diff / (smoothness + 1);
+          for (int64_t cur_step = 0; cur_step < smoothness; ++cur_step) {
+            start_from = start_from + diff;
+            records_to_process.push_back(start_from);
+          }
+        }
+
+        if (false == initial_altitude_set) {
+          // set initial altitude
+          const auto altitude_by_type = GetValueByType(original_record, DataType::kTypeAltitude);
+          if (altitude_by_type.Valid()) {
+            initial_altitude_set = true;
+            previous_altitude = altitude_by_type.value;
+          }
+        }
+
+        records_to_process.push_back(original_record);
+        // we use it instead of index > 0
+        ++valid_value_count;
+
+        for (auto& record : records_to_process) {
+          std::string output;
+          const auto dst_by_type = GetValueByType(record, DataType::kTypeDistance);
+          if (dst_by_type.Valid()) {
+            const auto distance(NumberToStringPrecision(dst_by_type.value, 100000.0, 5, 2));
+            output += fmt::format("{:>5} km", distance);
+          }
+
+          const auto hr_by_type = GetValueByType(record, DataType::kTypeHeartRate);
+          if (hr_by_type.Valid()) {
+            output += fmt::format("{:>5} bmp", hr_by_type.value);
+          }
+
+          const auto cadence_by_type = GetValueByType(record, DataType::kTypeCadence);
+          if (cadence_by_type.Valid()) {
+            output += fmt::format("{:>5} rpm", cadence_by_type.value);
+          }
+
+          const auto power_by_type = GetValueByType(record, DataType::kTypePower);
+          if (power_by_type.Valid()) {
+            output += fmt::format("{:>6} w", power_by_type.value);
+          }
+
+          const auto altitude_by_type = GetValueByType(record, DataType::kTypeAltitude);
+          if (altitude_by_type.Valid()) {
+            const int64_t altitude_diff = altitude_by_type.value - previous_altitude;
+            if (altitude_diff > 0) {
+              ascent += altitude_diff;
+            } else {
+              descent += altitude_diff;
+            }
+            previous_altitude = altitude_by_type.value;
+            output += fmt::format("{:>5} m", (ascent / 5) - 500);
+          }
+
+          const auto speed_by_type = GetValueByType(record, DataType::kTypeSpeed);
+          if (speed_by_type.Valid()) {
+            const auto speed(NumberToStringPrecision(speed_by_type.value, 277.77, 5, 1));
+            output += fmt::format("{:>6} km/h", speed);
+          }
+
+          const auto temp_by_type = GetValueByType(record, DataType::kTypeTemperature);
+          if (temp_by_type.Valid()) {
+            output += fmt::format("{:>4} C", temp_by_type.value);
+          }
+
+          const auto timestamp_by_type = GetValueByType(record, DataType::kTypeTimeStamp);
+          const int64_t current_record_timestamp = timestamp_by_type.Valid() ? timestamp_by_type.value : 0;
+          const int64_t milliseconds = (current_record_timestamp - first_fit_timestamp) + first_video_timestamp;
+          subtitles.emplace_back(records_count++, milliseconds, milliseconds + 60000, output);
+          if (subtitles.size() > 1) {
+            subtitles[subtitles.size() - 2].milliseconds_to = milliseconds;
+          }
+        }
+      }
 
       uint64_t saved_size = 0;
       std::filesystem::remove(output_file);
       std::ofstream output_stream(output_file, std::ios::out | std::ios::app | std::ios::binary);
       for (const auto item : subtitles) {
-        const Time time_from(GetTime(item.seconds_from));
-        const Time time_to(GetTime(item.seconds_to));
-        const auto file_out(fmt::format("{}\n{:0>2d}:{:0>2d}:{:0>2d},000 --> {:0>2d}:{:0>2d}:{:0>2d},000\n{}\n\n",
-                                        item.frame,
-                                        time_from.hours,
-                                        time_from.minutes,
-                                        time_from.seconds,
-                                        time_to.hours,
-                                        time_to.minutes,
-                                        time_to.seconds,
-                                        item.data));
+        const Time time_from(GetTime(item.milliseconds_from));
+        const Time time_to(GetTime(item.milliseconds_to));
+        const auto file_out(
+            fmt::format("{}\n{:0>2d}:{:0>2d}:{:0>2d},{:0>3d} --> {:0>2d}:{:0>2d}:{:0>2d},{:0>3d}\n{}\n\n",
+                        item.frame,
+                        time_from.hours,
+                        time_from.minutes,
+                        time_from.seconds,
+                        time_from.milliseconds,
+                        time_to.hours,
+                        time_to.minutes,
+                        time_to.seconds,
+                        time_to.milliseconds,
+                        item.data));
         output_stream.write(file_out.c_str(), file_out.size());
         saved_size += file_out.size();
       }
-      */
+
+
     } else {
       // checked at the cmd line validation
     }

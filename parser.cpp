@@ -1,3 +1,24 @@
+/*
+
+ MIT License
+
+ Copyright (c) 2022 pavel.sokolov@gmail.com / CEZEO software Ltd. All rights reserved.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+ documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+ rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+ persons to whom the Software is furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+ Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+ WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+*/
+
 #include "parser.h"
 
 #include <spdlog/spdlog.h>
@@ -10,41 +31,114 @@
 
 #include "fitsdk/fit_convert.h"
 
-DataTagUnit DataTypeToTag(DataType type) {
+namespace {
+
+constexpr std::string_view kSpeedTag("speed");
+constexpr std::string_view kSpeedUnitsTag("mm/sec");
+
+constexpr std::string_view kDistanceTag("distance");
+constexpr std::string_view kDistanceUnitsTag("cm");
+
+constexpr std::string_view kHeartRateTag("heartrate");
+constexpr std::string_view kHeartRateUnitsTag("bpm");
+
+constexpr std::string_view kAltitudeTag("altitude");
+constexpr std::string_view kAltitudeUnitsTag("cm");
+
+constexpr std::string_view kPowerTag("power");
+constexpr std::string_view kPowerUnitsTag("w");
+
+constexpr std::string_view kCadenceTag("cadence");
+constexpr std::string_view kCadenceUnitsTag("rpm");
+
+constexpr std::string_view kTemperatureTag("temperature");
+constexpr std::string_view kTemperatureUnitsTag("c");
+
+constexpr std::string_view kTimeStampTag("timestamp");
+constexpr std::string_view kTimeStampUnitsTag("sec");
+
+constexpr std::string_view kLatitudeTag("latitude");
+constexpr std::string_view kLatitudeUnitsTag("semicircles");
+
+constexpr std::string_view kLongitudeTag("longitude");
+constexpr std::string_view kLongitudeUnitsTag("semicircles");
+
+}  // namespace
+
+uint32_t DataTypeToMask(const DataType type) {
+  return 0x01 << static_cast<uint32_t>(type);
+}
+
+std::string_view DataTypeToName(const DataType type) {
   switch (type) {
     case DataType::kTypeAltitude:
-      return {kAltitudeTag, kAltitudeUnitsTag};
+      return kAltitudeTag;
     case DataType::kTypeLatitude:
-      return {kLatitudeTag, kLatitudeUnitsTag};
+      return kLatitudeTag;
     case DataType::kTypeLongitude:
-      return {kLongitudeTag, kLongitudeUnitsTag};
+      return kLongitudeTag;
     case DataType::kTypeSpeed:
-      return {kSpeedTag, kSpeedUnitsTag};
+      return kSpeedTag;
     case DataType::kTypeDistance:
-      return {kDistanceTag, kDistanceUnitsTag};
+      return kDistanceTag;
     case DataType::kTypeHeartRate:
-      return {kHeartRateTag, kHeartRateUnitsTag};
+      return kHeartRateTag;
     case DataType::kTypePower:
-      return {kPowerTag, kPowerUnitsTag};
+      return kPowerTag;
     case DataType::kTypeCadence:
-      return {kCadenceTag, kCadenceUnitsTag};
+      return kCadenceTag;
     case DataType::kTypeTemperature:
-      return {kTemperatureTag, kTemperatureUnitsTag};
+      return kTemperatureTag;
     case DataType::kTypeTimeStamp:
-      return {kTimeStampTag, kTimeStampUnitsTag};
+      return kTimeStampTag;
   }
-  if (type != DataType::kTypeNone) {
-    throw std::runtime_error("Wrong DataType supplied for conversion to the Tag");
+  return "";
+}
+
+std::string_view DataTypeToUnit(const DataType type) {
+  switch (type) {
+    case DataType::kTypeAltitude:
+      return kAltitudeUnitsTag;
+    case DataType::kTypeLatitude:
+      return kLatitudeUnitsTag;
+    case DataType::kTypeLongitude:
+      return kLongitudeUnitsTag;
+    case DataType::kTypeSpeed:
+      return kSpeedUnitsTag;
+    case DataType::kTypeDistance:
+      return kDistanceUnitsTag;
+    case DataType::kTypeHeartRate:
+      return kHeartRateUnitsTag;
+    case DataType::kTypePower:
+      return kPowerUnitsTag;
+    case DataType::kTypeCadence:
+      return kCadenceUnitsTag;
+    case DataType::kTypeTemperature:
+      return kTemperatureUnitsTag;
+    case DataType::kTypeTimeStamp:
+      return kTimeStampUnitsTag;
   }
-  return {"", ""};
+  return "";
+}
+
+void HeaderItem(std::vector<DataTagUnit>& header, const uint32_t header_bitmask, const DataType type) {
+  const uint32_t type_bitmask = DataTypeToMask(type);
+  if ((header_bitmask & type_bitmask) != 0) {
+    header.emplace_back(DataTypeToName(type), DataTypeToUnit(type));
+  }
+}
+
+void ApplyValue(Record& new_record, const DataType data_type, const int64_t value) {
+  uint32_t data_type_index = static_cast<uint32_t>(data_type);
+  new_record.values[data_type_index] = value;
+  new_record.Valid |= DataTypeToMask(data_type);
 }
 
 FitResult FitParser(std::string input_fit_file) {
-  // note: fit_result.used_data_types == DataType::kTypeNone have special meaning after returning from this function -
-  // error in processing
   FitResult fit_result;
+  uint32_t used_data_types{0};  // mask of values DataType values: 0x01 << DataType
+
   try {
-    uint32_t records_count = 0;
     const uintmax_t buffer_size = 4096;
     char buffer[buffer_size];
 
@@ -54,9 +148,6 @@ FitResult FitParser(std::string input_fit_file) {
     std::ifstream input_stream(input_fit_file, std::ios::in | std::ios::app | std::ios::binary);
     const uintmax_t input_file_size = std::filesystem::file_size(input_fit_file);
     uintmax_t was_read = 0;
-
-    uint32_t first_video_timestamp = 0;
-    uint32_t first_fit_timestamp = 0;
 
     SPDLOG_INFO("opening file: {}, size: {} bytes", input_fit_file, input_file_size);
 
@@ -74,108 +165,88 @@ FitResult FitParser(std::string input_fit_file) {
 
         const FIT_UINT8* fit_message_ptr = FitConvert_GetMessageData();
         const FIT_RECORD_MESG* fit_record_ptr = reinterpret_cast<const FIT_RECORD_MESG*>(fit_message_ptr);
-        /*
-        // fit timestamp should not be 0, because it's seconds since UTC 00:00 Dec 31 1989
-        if (0 == first_fit_timestamp) {
-          first_fit_timestamp = fit_record_ptr->timestamp;
-          if (offset > 0) {
-            first_fit_timestamp += offset;
-          } else if (offset < 0) {
-            first_video_timestamp = std::abs(offset);
-            subtitles.emplace_back(records_count++, 0, 0, "< .fit data is not available >");
-          }
-        }
 
-        if (offset > 0) {
-          // positive offset, 'offset' second of the data from .fit file will displayed at the first second of the video
-          if (fit_record_ptr->timestamp < first_fit_timestamp) {
-            continue;
-          }
-        }
-        */
-
-        DataEntry new_entry(fit_record_ptr->timestamp);
+        Record new_record;
+        ApplyValue(new_record, DataType::kTypeTimeStamp, fit_record_ptr->timestamp);
 
         std::string output;
         if (fit_record_ptr->distance != FIT_UINT32_INVALID) {
           // FIT_UINT32 distance = 100 * m = cm
-          new_entry.values.emplace_back(kDistanceTag, fit_record_ptr->distance);
-          fit_result.used_data_types |= DataType::kTypeDistance;
+          ApplyValue(new_record, DataType::kTypeDistance, fit_record_ptr->distance);
         }
 
         if (fit_record_ptr->heart_rate != FIT_BYTE_INVALID) {
           // FIT_UINT8 heart_rate = bpm
-          new_entry.values.emplace_back(kHeartRateTag, fit_record_ptr->heart_rate);
-          fit_result.used_data_types |= DataType::kTypeHeartRate;
+          ApplyValue(new_record, DataType::kTypeHeartRate, fit_record_ptr->heart_rate);
         }
 
         if (fit_record_ptr->cadence != FIT_BYTE_INVALID) {
           // FIT_UINT8 cadence = rpm
-          new_entry.values.emplace_back(kCadenceTag, fit_record_ptr->cadence);
-          fit_result.used_data_types |= DataType::kTypeCadence;
+          ApplyValue(new_record, DataType::kTypeCadence, fit_record_ptr->cadence);
         }
 
         if (fit_record_ptr->power != FIT_UINT16_INVALID) {
           // FIT_UINT16 power = watts
-          new_entry.values.emplace_back(kPowerTag, fit_record_ptr->power);
-          fit_result.used_data_types |= DataType::kTypePower;
+          ApplyValue(new_record, DataType::kTypePower, fit_record_ptr->power);
         }
 
         if (fit_record_ptr->altitude != FIT_UINT16_INVALID) {
-          // FIT_UINT16 altitude = 5 * m + 500,
-          new_entry.values.emplace_back(kAltitudeTag, fit_record_ptr->altitude);
-          fit_result.used_data_types |= DataType::kTypeAltitude;
+          // FIT_UINT16 altitude = 5 * m + 500
+          ApplyValue(new_record, DataType::kTypeAltitude, fit_record_ptr->altitude);
         }
 
         if (fit_record_ptr->speed != FIT_UINT16_INVALID) {
           // FIT_UINT16 speed = 1000 * m/s = mm/s
-          new_entry.values.emplace_back(kSpeedTag, fit_record_ptr->speed);
-          fit_result.used_data_types |= DataType::kTypeSpeed;
+          ApplyValue(new_record, DataType::kTypeSpeed, fit_record_ptr->speed);
         }
 
         if (fit_record_ptr->temperature != FIT_SINT8_INVALID) {
           // FIT_SINT8 temperature = C
-          new_entry.values.emplace_back(kTemperatureTag, fit_record_ptr->temperature);
-          fit_result.used_data_types |= DataType::kTypeTemperature;
+          ApplyValue(new_record, DataType::kTypeTemperature, fit_record_ptr->temperature);
         }
 
         if (fit_record_ptr->position_lat != FIT_SINT32_INVALID && fit_record_ptr->position_long != FIT_SINT32_INVALID) {
           // FIT_SINT32 position_lat = semicircles
           // FIT_SINT32 position_long = semicircles
-          new_entry.values.emplace_back(kLatitudeTag, fit_record_ptr->position_lat);
-          new_entry.values.emplace_back(kLongitudeTag, fit_record_ptr->position_long);
-          fit_result.used_data_types |= DataType::kTypeLongitude;
-          fit_result.used_data_types |= DataType::kTypeLatitude;
+          ApplyValue(new_record, DataType::kTypeLatitude, fit_record_ptr->position_lat);
+          ApplyValue(new_record, DataType::kTypeLongitude, fit_record_ptr->position_long);
         }
 
-        fit_result.result.emplace_back(std::move(new_entry));
-
-        /*
-        const uint32_t seconds = (fit_record_ptr->timestamp - first_fit_timestamp) + first_video_timestamp;
-        subtitles.emplace_back(records_count++, seconds, seconds + 60, output);
-        if (subtitles.size() > 1) {
-          subtitles[subtitles.size() - 2].seconds_to = seconds;
-        }
-        */
+        // first apply to global flags
+        used_data_types |= new_record.Valid;
+        // then move
+        fit_result.result.emplace_back(std::move(new_record));
       }
     }
-    if (fit_status == FIT_CONVERT_ERROR) {
+
+    if (fit_status == FIT_CONVERT_END_OF_FILE) {
+      // success
+      fit_result.status = ParseResult::kSuccess;
+      fit_result.header_flags = used_data_types;
+
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeAltitude);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeCadence);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeDistance);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeHeartRate);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeLatitude);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeLongitude);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypePower);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeSpeed);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeTemperature);
+      HeaderItem(fit_result.header, used_data_types, DataType::kTypeTimeStamp);
+
+    } else if (fit_status == FIT_CONVERT_ERROR) {
       SPDLOG_ERROR("error decoding file");
-      fit_result.used_data_types = DataType::kTypeNone;
     } else if (fit_status == FIT_CONVERT_CONTINUE) {
       SPDLOG_ERROR("unexpected end of file");
-      fit_result.used_data_types = DataType::kTypeNone;
     } else if (fit_status == FIT_CONVERT_DATA_TYPE_NOT_SUPPORTED) {
       SPDLOG_ERROR("file is not FIT file");
-      fit_result.used_data_types = DataType::kTypeNone;
     } else if (fit_status == FIT_CONVERT_PROTOCOL_VERSION_NOT_SUPPORTED) {
       SPDLOG_ERROR("protocol version not supported");
-      fit_result.used_data_types = DataType::kTypeNone;
     }
   } catch (const std::exception& e) {
     // file errors usually
     SPDLOG_ERROR("exception during processing: {}", e.what());
-    fit_result.used_data_types = DataType::kTypeNone;
   }
   return fit_result;
 }
