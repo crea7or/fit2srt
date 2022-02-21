@@ -167,15 +167,13 @@ int main(int argc, char* argv[]) {
   spdlog::set_pattern("[%H:%M:%S.%e] %^[%l]%$ %v");
 
   cxxopts::Options cmd_options("FIT converter", "FIT telemetry converter to SRT or JSON");
-  cmd_options.add_options()                                              //
-      ("i,input", "input FIT file path", cxxopts::value<std::string>())  //
-      ("o,output", "output file path", cxxopts::value<std::string>())    //
-      ("h,help", "help message")                                         //
-      ("t,type",
-       "output format to generate (srt or json)",
-       cxxopts::value<std::string>()->default_value(kOutputSrtTag))                                             //
-      ("f,offset", "offset in milliseconds to sync with video", cxxopts::value<int64_t>()->default_value("0"))  //
-      ("s,smooth", "smooth values", cxxopts::value<int32_t>()->default_value("0"));                             //
+  cmd_options.add_options()                                                        //
+      ("i,input", "", cxxopts::value<std::string>())                               //
+      ("o,output", "", cxxopts::value<std::string>())                              //
+      ("h,help", "")                                                               //
+      ("t,type", "", cxxopts::value<std::string>()->default_value(kOutputSrtTag))  //
+      ("f,offset", "", cxxopts::value<int64_t>()->default_value("0"))              //
+      ("s,smooth", "", cxxopts::value<int32_t>()->default_value("0"));             //
   const auto cmd_result = cmd_options.parse(argc, argv);
 
   if (argc < 3 || cmd_result.count("help") > 0) {
@@ -207,6 +205,7 @@ int main(int argc, char* argv[]) {
 
     FitResult fit_result = FitParser(input_fit_file);
     if (fit_result.status != ParseResult::kSuccess) {
+      // error reported in parser
       return 1;
     }
 
@@ -258,8 +257,8 @@ int main(int argc, char* argv[]) {
       int64_t records_count = 0;
       int64_t first_video_timestamp = 0;
       int64_t first_fit_timestamp = 0;
-      int64_t ascent = 500 * 5;   // x / 5 - 500
-      int64_t descent = 500 * 5;  // x / 5 - 500
+      int64_t ascent = 500 * 5;   // default for altitude, because altitude: meters = (value / 5 ) - 500
+      int64_t descent = 500 * 5;  // default for altitude, because altitude: meters = (value / 5 ) - 500
       int64_t previous_altitude = 0;
       bool initial_altitude_set = false;
       std::vector<SrtItem> subtitles;
@@ -401,7 +400,7 @@ int main(int argc, char* argv[]) {
 
 
     } else {
-      // checked at the cmd line validation
+      throw std::runtime_error("unknown output format");
     }
   } catch (const std::exception& e) {
     // file errors usually
