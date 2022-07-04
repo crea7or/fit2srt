@@ -173,7 +173,7 @@ int main(int argc, char* argv[]) {
       ("h,help", "")                                                               //
       ("t,type", "", cxxopts::value<std::string>()->default_value(kOutputSrtTag))  //
       ("f,offset", "", cxxopts::value<int64_t>()->default_value("0"))              //
-      ("s,smooth", "", cxxopts::value<int32_t>()->default_value("0"));             //
+      ("s,smooth", "", cxxopts::value<uint8_t>()->default_value("0"));             //
   const auto cmd_result = cmd_options.parse(argc, argv);
 
   if (argc < 3 || cmd_result.count("help") > 0) {
@@ -187,7 +187,7 @@ int main(int argc, char* argv[]) {
     const std::string output_file(cmd_result["output"].as<std::string>());
     const std::string output_type(cmd_result["type"].as<std::string>());
     const int64_t offset = cmd_result["offset"].as<int64_t>();
-    const int32_t smoothness = cmd_result["smooth"].as<int32_t>();
+    const uint8_t smoothness = cmd_result["smooth"].as<uint8_t>();
 
     if (output_type != kOutputJsonTag && output_type != kOutputSrtTag) {
       SPDLOG_ERROR("unknown output specified: '{}', only srt and .json supported", output_type);
@@ -261,13 +261,19 @@ int main(int argc, char* argv[]) {
       int64_t descent = 500 * 5;  // default for altitude, because altitude: meters = (value / 5 ) - 500
       int64_t previous_altitude = 0;
       bool initial_altitude_set = false;
+
+      // subtitles storage
       std::vector<SrtItem> subtitles;
+      subtitles.reserve((smoothness + 1) * fit_result.result.size());
 
       for (auto& rec : fit_result.result) {
         // convert all timestamps to milliseconds
         constexpr uint32_t type_index = static_cast<uint32_t>(DataType::kTypeTimeStamp);
         rec.values[type_index] *= 1000;
       }
+
+      std::vector<Record> records_to_process;
+      records_to_process.reserve(smoothness + 1);
 
       size_t valid_value_count = 0;
       for (size_t index = 0; index < fit_result.result.size(); ++index) {
@@ -295,8 +301,11 @@ int main(int argc, char* argv[]) {
           }
         }
 
+
+        // clear previous data
+        records_to_process.clear();
+
         // smoothness
-        std::vector<Record> records_to_process;
         if (valid_value_count > 0 && smoothness > 0) {
           Record start_from = fit_result.result[index - 1];
           Record diff = original_record - start_from;
@@ -397,8 +406,6 @@ int main(int argc, char* argv[]) {
         output_stream.write(file_out.c_str(), file_out.size());
         saved_size += file_out.size();
       }
-
-
     } else {
       throw std::runtime_error("unknown output format");
     }

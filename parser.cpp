@@ -63,6 +63,94 @@ constexpr std::string_view kLatitudeUnitsTag("semicircles");
 constexpr std::string_view kLongitudeTag("longitude");
 constexpr std::string_view kLongitudeUnitsTag("semicircles");
 
+constexpr std::string_view kStdinTag("stdin");
+
+struct Buffer final {
+ public:
+  Buffer(const size_t buffer_size) { buffer_.resize(buffer_size); }
+
+  void SetDataSize(const size_t size) { data_size_ = size; }
+
+  size_t GetDataSize() const { return data_size_; }
+
+  size_t GetBufferSize() const { return buffer_.size(); }
+
+  char* GetDataPtr() { return buffer_.data(); }
+
+ private:
+  std::vector<char> buffer_;
+  size_t data_size_{0};
+};
+
+// for std::cin unique_ptr
+struct NoopDeleter final {
+  void operator()(...) const {}
+};
+
+class DataSource {
+ public:
+  enum class Type {
+    kFile,
+    kStdin,
+  };
+
+  enum class Status {
+    kContinueRead,
+    kEndOfFile,
+    kError,
+  };
+
+  DataSource(Type type) : type_(type) {}
+
+  virtual ~DataSource() = default;
+
+  virtual Status ReadData(Buffer& buffer) = 0;
+
+ protected:
+  Status ReadDataInternal(std::istream& stream, Buffer& buffer) {
+    try {
+      stream.read(buffer.GetDataPtr(), buffer.GetBufferSize());
+      buffer.SetDataSize(stream.gcount());
+      if (stream.eof()) {
+        return Status::kEndOfFile;
+      } else if (stream.good()) {
+        return Status::kContinueRead;
+      }
+    } catch (const std::exception& e) {
+      SPDLOG_ERROR("input file reading error: {}", e.what());  //
+    }
+    return Status::kError;
+  }
+
+ private:
+  Type type_{Type::kFile};
+};
+
+
+class DataSourceFile : public DataSource {
+ public:
+  DataSourceFile(std::string source_name) : DataSource(DataSource::Type::kFile), source_name_(std::move(source_name)) {
+    stream_ = std::make_unique<std::ifstream>(source_name_, std::ios::in | std::ios::app | std::ios::binary);
+  }
+
+  Status ReadData(Buffer& buffer) override {
+    return ReadDataInternal(*stream_.get(), buffer);  //
+  }
+
+ private:
+  std::string source_name_;
+  std::unique_ptr<std::istream> stream_;
+};
+
+class DataSourceStdin : public DataSource {
+ public:
+  DataSourceStdin() : DataSource(DataSource::Type::kStdin) {}
+
+  Status ReadData(Buffer& buffer) override {
+    return ReadDataInternal(std::cin, buffer);  //
+  }
+};
+
 }  // namespace
 
 uint32_t DataTypeToMask(const DataType type) {
@@ -139,25 +227,19 @@ FitResult FitParser(std::string input_fit_file) {
   uint32_t used_data_types{0};  // mask of values DataType values: 0x01 << DataType
 
   try {
-    const uintmax_t buffer_size = 4096;
-    char buffer[buffer_size];
-
     FIT_CONVERT_RETURN fit_status = FIT_CONVERT_CONTINUE;
     FitConvert_Init(FIT_TRUE);
 
-    std::ifstream input_stream(input_fit_file, std::ios::in | std::ios::app | std::ios::binary);
-    const uintmax_t input_file_size = std::filesystem::file_size(input_fit_file);
-    uintmax_t was_read = 0;
+    Buffer data_buffer(4096);
+    std::unique_ptr<DataSource> data_source;
+    if (kStdinTag == input_fit_file) {
+      data_source = std::make_unique<DataSourceStdin>();
+    } else {
+      data_source = std::make_unique<DataSourceFile>(input_fit_file);
+    }
 
-    SPDLOG_INFO("opening file: {}, size: {} bytes", input_fit_file, input_file_size);
-
-    while ((input_file_size > was_read) && (fit_status == FIT_CONVERT_CONTINUE)) {
-      const auto available_bytes = input_file_size - was_read;
-      const auto bytes_read = available_bytes < buffer_size ? available_bytes : buffer_size;
-      input_stream.read(buffer, bytes_read);
-      was_read += bytes_read;
-
-      while (fit_status = FitConvert_Read(buffer, static_cast<FIT_UINT32>(bytes_read)),
+    while ((DataSource::Status::kError != data_source->ReadData(data_buffer)) && (fit_status == FIT_CONVERT_CONTINUE)) {
+      while (fit_status = FitConvert_Read(data_buffer.GetDataPtr(), static_cast<FIT_UINT32>(data_buffer.GetDataSize())),
              fit_status == FIT_CONVERT_MESSAGE_AVAILABLE) {
         if (FitConvert_GetMessageNumber() != FIT_MESG_NUM_RECORD) {
           continue;
