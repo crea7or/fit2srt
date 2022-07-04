@@ -4,17 +4,18 @@ This tool can be used to create subtitles overlay (without video re-encoding) fo
 
 Usage:
 ```
-fitsrt <input> <output> <offset>
+usage: fitconvert -i input_file -o output_file -t output_type -f offset -s N
 ```
-input - path to .fit file to read data from
 
-output - path to .srt file to write subtitle to
-
-offset - optional offset in seconds to sync video and .fit data
+-i - path to .fit file to read data from
+-o - path to .srt or .json file to write to
+-t - export type (optional, default to srt)
+-f - offset in milliseconds to sync video and .fit data (optional, for srt export only)
 * if the offset is positive - 'offset' second of the data from .fit file will be displayed at the first second of the video.
     it is for situations when you started video after starting recording your activity(that generated .fit file)
 * if the offset is negative - the first second of .fit data will be displayed at abs('offset') second of the video
     it is for situations when you started your activity (that generated .fit file) after starting the video
+-s - smooth values by inserting N smoothed values between timestamps (optional, for srt export only)
 
 
 You can place subtitles to the same folder as the video with the same file name(but keep .srt extension) or embed subtitles into the video file (without re-encoding). You can use [FFMPEG tool](https://www.ffmpeg.org/download.html) for embedding:
