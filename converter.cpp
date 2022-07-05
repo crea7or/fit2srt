@@ -91,10 +91,10 @@ usage: fitconvert -i input_file -o output_file -t output_type -f offset -s N
 -s - smooth values by inserting N smoothed values between timestamps (optional, for srt export only)
 )%";
 
-constexpr char* kOutputJsonTag = "json";
-constexpr char* kOutputSrtTag = "srt";
-constexpr char* kInputStdinTag = "stdin";
-constexpr char* kOutputStdoutTag = "stdout";
+constexpr const char* kOutputJsonTag = "json";
+constexpr const char* kOutputSrtTag = "srt";
+constexpr const char* kInputStdinTag = "stdin";
+constexpr const char* kOutputStdoutTag = "stdout";
 
 struct Time {
   int64_t hours{0};
