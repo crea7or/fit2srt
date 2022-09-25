@@ -339,7 +339,7 @@ int main(int argc, char* argv[]) {
 
           const auto hr_by_type = GetValueByType(record, DataType::kTypeHeartRate);
           if (hr_by_type.Valid()) {
-            output += fmt::format("{:>5} bmp", hr_by_type.value);
+            output += fmt::format("{:>5} bpm", hr_by_type.value);
           }
 
           const auto cadence_by_type = GetValueByType(record, DataType::kTypeCadence);
