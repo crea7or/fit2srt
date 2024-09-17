@@ -277,9 +277,19 @@ FitResult FitParser(std::string input_fit_file) {
           ApplyValue(new_record, DataType::kTypeAltitude, fit_record_ptr->altitude);
         }
 
+        if (fit_record_ptr->enhanced_altitude != FIT_UINT32_INVALID) {
+          // FIT_UINT32 enhanced_altitude = 5 * m + 500
+          ApplyValue(new_record, DataType::kTypeAltitude, fit_record_ptr->enhanced_altitude);
+        }
+
         if (fit_record_ptr->speed != FIT_UINT16_INVALID) {
           // FIT_UINT16 speed = 1000 * m/s = mm/s
           ApplyValue(new_record, DataType::kTypeSpeed, fit_record_ptr->speed);
+        }
+
+        if (fit_record_ptr->enhanced_speed != FIT_UINT32_INVALID) {
+          // FIT_UINT32 enhanced_speed = 1000 * m/s = mm/s
+          ApplyValue(new_record, DataType::kTypeSpeed, fit_record_ptr->enhanced_speed);
         }
 
         if (fit_record_ptr->temperature != FIT_SINT8_INVALID) {
