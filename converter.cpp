@@ -72,7 +72,7 @@ constexpr const char kBanner[] = R"%(
   :CEZEONCEZEOd/.ydCEZEOCEZEOdo.sNCEZEOCEZEOCEZEOCEZEOCEZEOCEZEOCEZEOEZNEZEZN+
    `+dCEZEOEZEZdoCEZEOCEZEOEZ#N+CEZEOCEZEOCEZEOCEZEOCEZEOCEZEOCEZEOCEZEOEZ#s.
       .:+ooooo/` :+oooooooooo+. .+ooooooooooooooooooooooooooooooooooooo+/.
- C E Z E O  S O F T W A R E (c) 2022   FIT telemetry converter to SRT or JSON
+ C E Z E O  S O F T W A R E (c) 2025   FIT telemetry converter to SRT, VTT or JSON
 
 )%";
 
@@ -82,7 +82,7 @@ usage: fitconvert -i input_file -o output_file -t output_type -f offset -s N
 
 -i - path to .fit file to read data from
 -o - path to .srt or .json file to write to
--t - export type (optional, default to srt)
+-t - export type: srt, vtt or json
 -f - offset in milliseconds to sync video and .fit data (optional, for srt export only)
 * if the offset is positive - 'offset' second of the data from .fit file will be displayed at the first second of the video.
     it is for situations when you started video after starting recording your activity(that generated .fit file)
@@ -91,10 +91,10 @@ usage: fitconvert -i input_file -o output_file -t output_type -f offset -s N
 -s - smooth values by inserting N smoothed values between timestamps (optional, for srt export only)
 )%";
 
-constexpr const char* kOutputJsonTag = "json";
-constexpr const char* kOutputSrtTag = "srt";
-constexpr const char* kInputStdinTag = "stdin";
-constexpr const char* kOutputStdoutTag = "stdout";
+constexpr std::string_view kOutputJsonTag = "json";
+constexpr std::string_view kOutputSrtTag = "srt";
+constexpr std::string_view kOutputVttTag = "vtt";
+constexpr std::string_view kVttHeaderTag("WEBVTT\n\n");
 
 struct Time {
   int64_t hours{0};
@@ -167,30 +167,30 @@ int main(int argc, char* argv[]) {
   spdlog::set_pattern("[%H:%M:%S.%e] %^[%l]%$ %v");
 
   cxxopts::Options cmd_options("FIT converter", "FIT telemetry converter to SRT or JSON");
-  cmd_options.add_options()                                                        //
-      ("i,input", "", cxxopts::value<std::string>())                               //
-      ("o,output", "", cxxopts::value<std::string>())                              //
-      ("h,help", "")                                                               //
-      ("t,type", "", cxxopts::value<std::string>()->default_value(kOutputSrtTag))  //
-      ("f,offset", "", cxxopts::value<int64_t>()->default_value("0"))              //
-      ("s,smooth", "", cxxopts::value<uint8_t>()->default_value("0"));             //
+  cmd_options.add_options()                                                               //
+      ("i,input", "", cxxopts::value<std::string>())                                      //
+      ("o,output", "", cxxopts::value<std::string>())                                     //
+      ("h,help", "")                                                                      //
+      ("t,type", "", cxxopts::value<std::string>()->default_value(kOutputSrtTag.data()))  //
+      ("f,offset", "", cxxopts::value<int64_t>()->default_value("0"))                     //
+      ("s,smooth", "", cxxopts::value<uint8_t>()->default_value("0"));                    //
   const auto cmd_result = cmd_options.parse(argc, argv);
 
-  if (argc < 3 || cmd_result.count("help") > 0) {
+  if (argc < 4 || cmd_result.count("help") > 0) {
     std::cout << kBanner << std::endl;
     std::cout << kHelp << std::endl;
     return 1;
   }
 
-  try {
-    const std::string input_fit_file(cmd_result["input"].as<std::string>());
-    const std::string output_file(cmd_result["output"].as<std::string>());
-    const std::string output_type(cmd_result["type"].as<std::string>());
-    const int64_t offset = cmd_result["offset"].as<int64_t>();
-    const uint8_t smoothness = cmd_result["smooth"].as<uint8_t>();
+  const std::string input_fit_file(cmd_result["input"].as<std::string>());
+  const std::string output_file(cmd_result["output"].as<std::string>());
+  const std::string output_type(cmd_result["type"].as<std::string>());
+  const int64_t offset = cmd_result["offset"].as<int64_t>();
+  const uint8_t smoothness = cmd_result["smooth"].as<uint8_t>();
 
-    if (output_type != kOutputJsonTag && output_type != kOutputSrtTag) {
-      SPDLOG_ERROR("unknown output specified: '{}', only srt and .json supported", output_type);
+  try {
+    if (output_type != kOutputJsonTag && output_type != kOutputSrtTag && output_type != kOutputVttTag) {
+      SPDLOG_ERROR("unknown output specified: '{}', only srt, vtt and .json supported", output_type);
       return 1;
     }
 
@@ -203,8 +203,8 @@ int main(int argc, char* argv[]) {
       return 1;
     }
 
-    FitResult fit_result = FitParser(input_fit_file);
-    if (fit_result.status != ParseResult::kSuccess) {
+    std::unique_ptr<FitResult> fit_result = FitParser(input_fit_file);
+    if (fit_result->status != ParseResult::kSuccess) {
       // error reported in parser
       return 1;
     }
@@ -217,7 +217,7 @@ int main(int argc, char* argv[]) {
       writer.Key("header");
       writer.StartArray();
       // header objects
-      for (const auto& header_item : fit_result.header) {
+      for (const auto& header_item : fit_result->header) {
         writer.StartObject();
         writer.Key("data");
         writer.String(header_item.data_tag.data(), static_cast<rapidjson::SizeType>(header_item.data_tag.size()));
@@ -230,7 +230,7 @@ int main(int argc, char* argv[]) {
       writer.Key("records");
       writer.StartArray();
 
-      for (const auto& item : fit_result.result) {
+      for (const auto& item : fit_result->result) {
         writer.StartObject();
 
         for (uint32_t index = kDataTypeFirst; index < kDataTypeMax; ++index) {
@@ -250,10 +250,11 @@ int main(int argc, char* argv[]) {
 
       std::filesystem::remove(output_file);
       std::ofstream output_stream(output_file, std::ios::out | std::ios::app | std::ios::binary);
+      output_stream.exceptions(std::ios_base::badbit);
       output_stream.write(string_buffer.GetString(), string_buffer.GetSize());
       output_stream.close();
 
-    } else if (output_type == kOutputSrtTag) {
+    } else if (kOutputSrtTag == output_type || kOutputVttTag == output_type) {
       int64_t records_count = 0;
       int64_t first_video_timestamp = 0;
       int64_t first_fit_timestamp = 0;
@@ -264,20 +265,14 @@ int main(int argc, char* argv[]) {
 
       // subtitles storage
       std::vector<SrtItem> subtitles;
-      subtitles.reserve((smoothness + 1) * fit_result.result.size());
-
-      for (auto& rec : fit_result.result) {
-        // convert all timestamps to milliseconds
-        constexpr uint32_t type_index = static_cast<uint32_t>(DataType::kTypeTimeStamp);
-        rec.values[type_index] *= 1000;
-      }
+      subtitles.reserve((smoothness + 1) * fit_result->result.size());
 
       std::vector<Record> records_to_process;
       records_to_process.reserve(smoothness + 1);
 
       size_t valid_value_count = 0;
-      for (size_t index = 0; index < fit_result.result.size(); ++index) {
-        const auto& original_record = fit_result.result[index];
+      for (size_t index = 0; index < fit_result->result.size(); ++index) {
+        const auto& original_record = fit_result->result[index];
 
         const auto record_time_by_type = GetValueByType(original_record, DataType::kTypeTimeStamp);
         const int64_t record_timestamp = record_time_by_type.Valid() ? record_time_by_type.value : 0;
@@ -294,20 +289,18 @@ int main(int argc, char* argv[]) {
         }
 
         if (offset > 0) {
-          // positive offset, 'offset' second of the data from .fit file will displayed at the first second of the
-          // video
+          // positive offset, 'offset' second of the data from .fit file will displayed at the first second of the video
           if (record_timestamp < first_fit_timestamp) {
             continue;
           }
         }
-
 
         // clear previous data
         records_to_process.clear();
 
         // smoothness
         if (valid_value_count > 0 && smoothness > 0) {
-          Record start_from = fit_result.result[index - 1];
+          Record start_from = fit_result->result[index - 1];
           Record diff = original_record - start_from;
           diff = diff / (smoothness + 1);
           for (int64_t cur_step = 0; cur_step < smoothness; ++cur_step) {
@@ -385,22 +378,36 @@ int main(int argc, char* argv[]) {
         }
       }
 
+
       uint64_t saved_size = 0;
       std::filesystem::remove(output_file);
       std::ofstream output_stream(output_file, std::ios::out | std::ios::app | std::ios::binary);
+      output_stream.exceptions(std::ios_base::badbit);
+      // differentiate between .srt and .vtt
+      char milliseconds_delimiter = ',';
+      if (kOutputVttTag == output_type) {
+        milliseconds_delimiter = '.';
+        output_stream.write(kVttHeaderTag.data(), kVttHeaderTag.size());
+      }
+
       for (const auto item : subtitles) {
+        if (kOutputVttTag == output_type) {
+          milliseconds_delimiter = '.';
+        }
         const Time time_from(GetTime(item.milliseconds_from));
         const Time time_to(GetTime(item.milliseconds_to));
         const auto file_out(
-            fmt::format("{}\n{:0>2d}:{:0>2d}:{:0>2d},{:0>3d} --> {:0>2d}:{:0>2d}:{:0>2d},{:0>3d}\n{}\n\n",
+            fmt::format("{}\n{:0>2d}:{:0>2d}:{:0>2d}{}{:0>3d} --> {:0>2d}:{:0>2d}:{:0>2d}{}{:0>3d}\n{}\n\n",
                         item.frame,
                         time_from.hours,
                         time_from.minutes,
                         time_from.seconds,
+                        milliseconds_delimiter,
                         time_from.milliseconds,
                         time_to.hours,
                         time_to.minutes,
                         time_to.seconds,
+                        milliseconds_delimiter,
                         time_to.milliseconds,
                         item.data));
         output_stream.write(file_out.c_str(), file_out.size());
@@ -409,9 +416,12 @@ int main(int argc, char* argv[]) {
     } else {
       throw std::runtime_error("unknown output format");
     }
+  } catch (const std::ios_base::failure& fail) {
+    SPDLOG_ERROR("file problem during processing: {}, check: {}", fail.what(), output_file);
+    return 1;
   } catch (const std::exception& e) {
-    // file errors usually
     SPDLOG_ERROR("exception during processing: {}", e.what());
+    return 1;
   }
 
   return 0;

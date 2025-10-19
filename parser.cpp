@@ -131,6 +131,7 @@ class DataSourceFile : public DataSource {
  public:
   DataSourceFile(std::string source_name) : DataSource(DataSource::Type::kFile), source_name_(std::move(source_name)) {
     stream_ = std::make_unique<std::ifstream>(source_name_, std::ios::in | std::ios::app | std::ios::binary);
+    stream_->exceptions(std::ios_base::badbit);
   }
 
   Status ReadData(Buffer& buffer) override {
@@ -146,9 +147,7 @@ class DataSourceStdin : public DataSource {
  public:
   DataSourceStdin() : DataSource(DataSource::Type::kStdin) {}
 
-  Status ReadData(Buffer& buffer) override {
-    return ReadDataInternal(std::cin, buffer);  //
-  }
+  Status ReadData(Buffer& buffer) override { return ReadDataInternal(std::cin, buffer); }
 };
 
 }  // namespace
@@ -217,15 +216,15 @@ void HeaderItem(std::vector<DataTagUnit>& header, const uint32_t header_bitmask,
 }
 
 void ApplyValue(Record& new_record, const DataType data_type, const int64_t value) {
-  uint32_t data_type_index = static_cast<uint32_t>(data_type);
+  const uint32_t data_type_index = static_cast<uint32_t>(data_type);
   new_record.values[data_type_index] = value;
   new_record.Valid |= DataTypeToMask(data_type);
 }
 
-FitResult FitParser(std::string input_fit_file) {
-  FitResult fit_result;
+std::unique_ptr<FitResult> FitParser(std::string input_fit_file) {
+  auto fit_result = std::make_unique<FitResult>();
   uint32_t used_data_types{0};  // mask of values DataType values: 0x01 << DataType
-
+  uint64_t data_source_size{0};
   try {
     FIT_CONVERT_RETURN fit_status = FIT_CONVERT_CONTINUE;
     FitConvert_Init(FIT_TRUE);
@@ -236,6 +235,8 @@ FitResult FitParser(std::string input_fit_file) {
       data_source = std::make_unique<DataSourceStdin>();
     } else {
       data_source = std::make_unique<DataSourceFile>(input_fit_file);
+      data_source_size = std::filesystem::file_size(input_fit_file);
+      fit_result->result.reserve(data_source_size / 60);  // empirical number of bytes per record on average
     }
 
     while ((DataSource::Status::kError != data_source->ReadData(data_buffer)) && (fit_status == FIT_CONVERT_CONTINUE)) {
@@ -248,84 +249,85 @@ FitResult FitParser(std::string input_fit_file) {
         const FIT_UINT8* fit_message_ptr = FitConvert_GetMessageData();
         const FIT_RECORD_MESG* fit_record_ptr = reinterpret_cast<const FIT_RECORD_MESG*>(fit_message_ptr);
 
-        Record new_record;
-        ApplyValue(new_record, DataType::kTypeTimeStamp, fit_record_ptr->timestamp);
+        // allocate struct
+        fit_result->result.emplace_back();
+        // convert timestamp to milliseconds
+        const int64_t type_msec = static_cast<int64_t>(fit_record_ptr->timestamp) * 1000;
+        ApplyValue(fit_result->result.back(), DataType::kTypeTimeStamp, type_msec);
 
         std::string output;
         if (fit_record_ptr->distance != FIT_UINT32_INVALID) {
           // FIT_UINT32 distance = 100 * m = cm
-          ApplyValue(new_record, DataType::kTypeDistance, fit_record_ptr->distance);
+          ApplyValue(fit_result->result.back(), DataType::kTypeDistance, fit_record_ptr->distance);
         }
 
         if (fit_record_ptr->heart_rate != FIT_BYTE_INVALID) {
           // FIT_UINT8 heart_rate = bpm
-          ApplyValue(new_record, DataType::kTypeHeartRate, fit_record_ptr->heart_rate);
+          ApplyValue(fit_result->result.back(), DataType::kTypeHeartRate, fit_record_ptr->heart_rate);
         }
 
         if (fit_record_ptr->cadence != FIT_BYTE_INVALID) {
           // FIT_UINT8 cadence = rpm
-          ApplyValue(new_record, DataType::kTypeCadence, fit_record_ptr->cadence);
+          ApplyValue(fit_result->result.back(), DataType::kTypeCadence, fit_record_ptr->cadence);
         }
 
         if (fit_record_ptr->power != FIT_UINT16_INVALID) {
           // FIT_UINT16 power = watts
-          ApplyValue(new_record, DataType::kTypePower, fit_record_ptr->power);
+          ApplyValue(fit_result->result.back(), DataType::kTypePower, fit_record_ptr->power);
         }
 
         if (fit_record_ptr->altitude != FIT_UINT16_INVALID) {
           // FIT_UINT16 altitude = 5 * m + 500
-          ApplyValue(new_record, DataType::kTypeAltitude, fit_record_ptr->altitude);
+          ApplyValue(fit_result->result.back(), DataType::kTypeAltitude, fit_record_ptr->altitude);
         }
 
         if (fit_record_ptr->enhanced_altitude != FIT_UINT32_INVALID) {
           // FIT_UINT32 enhanced_altitude = 5 * m + 500
-          ApplyValue(new_record, DataType::kTypeAltitude, fit_record_ptr->enhanced_altitude);
+          ApplyValue(fit_result->result.back(), DataType::kTypeAltitude, fit_record_ptr->enhanced_altitude);
         }
 
         if (fit_record_ptr->speed != FIT_UINT16_INVALID) {
           // FIT_UINT16 speed = 1000 * m/s = mm/s
-          ApplyValue(new_record, DataType::kTypeSpeed, fit_record_ptr->speed);
+          ApplyValue(fit_result->result.back(), DataType::kTypeSpeed, fit_record_ptr->speed);
         }
 
         if (fit_record_ptr->enhanced_speed != FIT_UINT32_INVALID) {
           // FIT_UINT32 enhanced_speed = 1000 * m/s = mm/s
-          ApplyValue(new_record, DataType::kTypeSpeed, fit_record_ptr->enhanced_speed);
+          ApplyValue(fit_result->result.back(), DataType::kTypeSpeed, fit_record_ptr->enhanced_speed);
         }
 
         if (fit_record_ptr->temperature != FIT_SINT8_INVALID) {
           // FIT_SINT8 temperature = C
-          ApplyValue(new_record, DataType::kTypeTemperature, fit_record_ptr->temperature);
+          ApplyValue(fit_result->result.back(), DataType::kTypeTemperature, fit_record_ptr->temperature);
         }
 
         if (fit_record_ptr->position_lat != FIT_SINT32_INVALID && fit_record_ptr->position_long != FIT_SINT32_INVALID) {
           // FIT_SINT32 position_lat = semicircles
           // FIT_SINT32 position_long = semicircles
-          ApplyValue(new_record, DataType::kTypeLatitude, fit_record_ptr->position_lat);
-          ApplyValue(new_record, DataType::kTypeLongitude, fit_record_ptr->position_long);
+          ApplyValue(fit_result->result.back(), DataType::kTypeLatitude, fit_record_ptr->position_lat);
+          ApplyValue(fit_result->result.back(), DataType::kTypeLongitude, fit_record_ptr->position_long);
         }
 
         // first apply to global flags
-        used_data_types |= new_record.Valid;
-        // then move
-        fit_result.result.emplace_back(std::move(new_record));
+        used_data_types |= fit_result->result.back().Valid;
       }
     }
 
     if (fit_status == FIT_CONVERT_END_OF_FILE) {
       // success
-      fit_result.status = ParseResult::kSuccess;
-      fit_result.header_flags = used_data_types;
+      fit_result->status = ParseResult::kSuccess;
+      fit_result->header_flags = used_data_types;
 
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeAltitude);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeCadence);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeDistance);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeHeartRate);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeLatitude);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeLongitude);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypePower);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeSpeed);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeTemperature);
-      HeaderItem(fit_result.header, used_data_types, DataType::kTypeTimeStamp);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeAltitude);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeCadence);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeDistance);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeHeartRate);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeLatitude);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeLongitude);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypePower);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeSpeed);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeTemperature);
+      HeaderItem(fit_result->header, used_data_types, DataType::kTypeTimeStamp);
 
     } else if (fit_status == FIT_CONVERT_ERROR) {
       SPDLOG_ERROR("error decoding file");
@@ -340,5 +342,6 @@ FitResult FitParser(std::string input_fit_file) {
     // file errors usually
     SPDLOG_ERROR("exception during processing: {}", e.what());
   }
+  SPDLOG_INFO("fit records processed: {}, source size: {}", fit_result->result.size(), data_source_size);
   return fit_result;
 }

@@ -21,6 +21,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 
 enum class DataType : uint32_t {
   // always should be zero
@@ -106,4 +107,4 @@ std::string_view DataTypeToName(const DataType type);
 std::string_view DataTypeToUnit(const DataType type);
 uint32_t DataTypeToMask(const DataType type);
 
-FitResult FitParser(std::string input);
+std::unique_ptr<FitResult> FitParser(std::string input);
